@@ -1,3 +1,4 @@
+import os
 import queue
 import subprocess
 import threading
@@ -9,6 +10,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from api.gemini_tts import GeminiTTSClient
+from ui.overlay_editor import OverlayEditor
 from ui.settings_dialog import SettingsDialog
 from ui.task_form import AddTaskDialog
 from utils.config import Config, AffiliateTask
@@ -64,6 +66,8 @@ class MainApp(ctk.CTk):
         ctk.CTkButton(toolbar, text="✏ Edit", width=80, command=self._edit_task).pack(side="left", padx=4)
         ctk.CTkButton(toolbar, text="🗑 Delete", width=80, fg_color="gray40",
                       command=self._delete_task).pack(side="left", padx=4)
+        ctk.CTkButton(toolbar, text="🎨 Overlay", width=90,
+                      command=self._open_overlay).pack(side="left", padx=4)
         ctk.CTkButton(toolbar, text="▶ Generate All", width=120,
                       command=self._generate_all).pack(side="right", padx=4)
 
@@ -102,7 +106,12 @@ class MainApp(ctk.CTk):
         self._row_frames.clear()
 
         for i, task in enumerate(self.tasks):
-            bg = ("gray80", "gray25") if i % 2 == 0 else ("gray75", "gray22")
+            if task.status == "done":
+                bg = ("#1a3d1a", "#1a3d1a")
+            elif i % 2 == 0:
+                bg = ("gray80", "gray25")
+            else:
+                bg = ("gray75", "gray22")
             row = ctk.CTkFrame(self._table_body, fg_color=bg, height=28)
             row.pack(fill="x", pady=1)
             row.pack_propagate(False)
@@ -116,7 +125,9 @@ class MainApp(ctk.CTk):
                 STATUS_ICONS.get(task.status, task.status),
             ]
             for val, w in zip(values, COL_WIDTHS):
-                ctk.CTkLabel(row, text=val, width=w, anchor="w").pack(side="left", padx=4)
+                lbl = ctk.CTkLabel(row, text=val, width=w, anchor="w")
+                lbl.pack(side="left", padx=4)
+                lbl.bind("<Button-1>", lambda e, idx=i: self._select_row(idx))
 
             row.bind("<Button-1>", lambda e, idx=i: self._select_row(idx))
             self._row_frames.append(row)
@@ -126,8 +137,15 @@ class MainApp(ctk.CTk):
     def _select_row(self, idx: int):
         self._selected = idx
         for i, rf in enumerate(self._row_frames):
-            rf.configure(fg_color=("dodgerblue", "steelblue") if i == idx
-                         else (("gray80", "gray25") if i % 2 == 0 else ("gray75", "gray22")))
+            if i == idx:
+                color = ("dodgerblue", "steelblue")
+            elif self.tasks[i].status == "done":
+                color = ("#1a3d1a", "#1a3d1a")
+            elif i % 2 == 0:
+                color = ("gray80", "gray25")
+            else:
+                color = ("gray75", "gray22")
+            rf.configure(fg_color=color)
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -150,6 +168,14 @@ class MainApp(ctk.CTk):
         self.wait_window(dlg)
         if dlg.result:
             self._refresh_table()
+
+    def _open_overlay(self):
+        idx = getattr(self, "_selected", None)
+        if idx is None or idx >= len(self.tasks):
+            messagebox.showinfo("Select a Task", "Please select a task first.")
+            return
+        dlg = OverlayEditor(self, self.tasks[idx])
+        self.wait_window(dlg)
 
     def _delete_task(self):
         idx = getattr(self, "_selected", None)
@@ -188,17 +214,22 @@ class MainApp(ctk.CTk):
             if not video_files:
                 raise RuntimeError(f"No video files in: {task.folder}")
 
+            safe = safe_filename(task.name)
+            out_dir = f"{task.folder}/{safe}"
+            os.makedirs(out_dir, exist_ok=True)
+            log(f"Output folder: {out_dir}")
+
             for n, script in enumerate(task.scripts, start=1):
-                safe = safe_filename(task.name)
-                mp3_path = f"{task.folder}/{safe}_script_{n}.mp3"
-                mp4_path = f"{task.folder}/{safe}_script_{n}.mp4"
+                audio_hint = f"{out_dir}/{safe}_script_{n}.wav"
+                mp4_path = f"{out_dir}/{safe}_script_{n}.mp4"
 
                 log(f"Script {n}/{len(task.scripts)} → TTS...")
-                client.synthesize(script, task.voice, mp3_path)
-                log(f"Script {n} TTS done → {mp3_path}")
+                audio_path = client.synthesize(script, task.voice, audio_hint)
+                log(f"Script {n} TTS done → {audio_path}")
 
                 log(f"Script {n} → Building video...")
-                build_video(mp3_path, video_files, mp4_path, task.clip_duration, log=log)
+                build_video(audio_path, video_files, mp4_path, task.clip_duration,
+                            overlays=task.overlays, log=log)
                 log(f"Script {n} done → {mp4_path}")
 
             task.status = "done"

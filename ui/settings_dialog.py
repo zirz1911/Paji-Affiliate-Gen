@@ -1,11 +1,11 @@
 import customtkinter as ctk
+from tkinter import messagebox
 from utils.config import Config
 from api.gemini_tts import VOICES
 
 MODELS = [
-    "gemini-2.5-flash-tts",
-    "gemini-2.5-pro-tts",
-    "gemini-2.5-flash-lite-preview-tts",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
 ]
 
 
@@ -14,8 +14,8 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self.config = config
         self.title("Settings")
-        self.geometry("460x340")
-        self.resizable(False, False)
+        self.geometry("460x420")
+        self.resizable(False, True)
         self.grab_set()
         self._show_key = False
         self._build()
@@ -45,7 +45,7 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkEntry(self, textvariable=self._dur_var, width=120).pack(anchor="w", **pad)
 
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=16, pady=16)
+        btn_row.pack(side="bottom", fill="x", padx=16, pady=16)
         ctk.CTkButton(btn_row, text="Save", command=self._save).pack(side="right")
         ctk.CTkButton(btn_row, text="Cancel", fg_color="gray40",
                       command=self.destroy).pack(side="right", padx=(0, 8))
@@ -64,5 +64,10 @@ class SettingsDialog(ctk.CTkToplevel):
         self.config.model = self._model_var.get()
         self.config.default_voice = self._voice_var.get()
         self.config.default_clip_duration = dur
-        self.config.save()
-        self.destroy()
+
+        try:
+            self.config.save()
+            messagebox.showinfo("Saved", "Settings saved successfully.", parent=self)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Save Failed", f"Could not save settings:\n{e}", parent=self)
